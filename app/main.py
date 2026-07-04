@@ -13,7 +13,7 @@ UPLOAD_DIR = "uploads"
 if not os.path.exists(UPLOAD_DIR):
     os.makedirs(UPLOAD_DIR)
 
-allowed_url = os.getenv("BASE_URL")
+allowed_url = os.getenv("ALLOWED_URL")
 
 app = FastAPI()
 
