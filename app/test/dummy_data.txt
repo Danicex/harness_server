@@ -1,0 +1,16 @@
+hotel_profile ✔️
+room ✔️
+product ✔️
+staff ✔️
+customer ✔️
+inbox ✔️
+blog ✔️
+booking ✔️
+sale ✔️
+analytics
+pagination
+rate limiting
+call_log
+data_set
+video
+slides
