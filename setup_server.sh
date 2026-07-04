@@ -1,35 +1,35 @@
 #!/usr/bin/env bash
 #
-# Automated server setup script
+# Automated server setup script (FastAPI edition)
 # Usage: fill in the CONFIG section below, then run:
 #   chmod +x setup_server.sh
 #   ./setup_server.sh
 #
-# Run as a normal sudo-capable user (not root).
-# Tested on Ubuntu. Review before running on a production box.
-
+# Assumes:
+#   - You already created a sudo user (see create_user.sh) and are running as them.
+#   - You've already cloned your repo into PROJECT_DIR yourself.
+#   - Your entrypoint is PROJECT_DIR/app/main.py with a FastAPI instance named `app`.
+#
 set -euo pipefail
 
 # ============ CONFIG — edit these ============
-DOMAIN="your_domain.com"
-DOMAIN_WWW="www.your_domain.com"
-EMAIL="your_email@example.com"
+DOMAIN="encheiron.com"
+DOMAIN_WWW="www.encheiron.com"
+EMAIL="encheiron@gmail.com"
 
-DB_NAME="your_db_name"
-DB_USER="your_user"
-DB_PASSWORD="your_password"
+DB_NAME="harness_db"
+DB_USER="tegabytes"
+DB_PASSWORD="2uqxjWF2ZDr8KM"
 
-REDIS_PASSWORD="your_redis_password"
+REDIS_PASSWORD="c8n6&d@@%fe5"
 
-PROJECT_NAME="your_project"
+PROJECT_NAME="harness"
 PROJECT_DIR="/var/www/${PROJECT_NAME}"
-REPO_URL="git@github.com:your_username/your_repo.git"
-GIT_NAME="Your Name"
-GIT_EMAIL="${EMAIL}"
 
 SECRET_KEY="change_me_$(openssl rand -hex 16)"
 LINUX_USER="$(whoami)"
-IS_DJANGO=true   # set false to skip migrate/collectstatic/createsuperuser
+
+UVICORN_WORKERS=4
 # ===============================================
 
 log() { echo -e "\n\033[1;32m==> $1\033[0m"; }
@@ -88,42 +88,23 @@ step_nginx_install() {
     sudo systemctl enable --now nginx
 }
 
-# 6. Git + clone
-step_git_clone() {
-    log "Configuring Git and cloning repo"
-    sudo apt install git -y
-    git config --global user.name "${GIT_NAME}"
-    git config --global user.email "${GIT_EMAIL}"
-
-    if [ ! -f ~/.ssh/id_ed25519 ]; then
-        ssh-keygen -t ed25519 -C "${GIT_EMAIL}" -N "" -f ~/.ssh/id_ed25519
-    fi
-    eval "$(ssh-agent -s)"
-    ssh-add ~/.ssh/id_ed25519
-
-    echo "---- Add this public key to GitHub (Settings > SSH Keys) ----"
-    cat ~/.ssh/id_ed25519.pub
-    pause "Add the key to GitHub now, then"
-
-    sudo mkdir -p "${PROJECT_DIR}"
-    sudo chown "${LINUX_USER}:${LINUX_USER}" "${PROJECT_DIR}"
-    cd "${PROJECT_DIR}"
-    if [ ! -d .git ]; then
-        git clone "${REPO_URL}" .
-    else
-        echo "Repo already cloned, skipping."
-    fi
-}
-
-# 7. Virtualenv + app setup
+# 6. Virtualenv + app setup
 step_venv_setup() {
     log "Setting up virtualenv and app"
+    if [ ! -d "${PROJECT_DIR}" ]; then
+        echo "ERROR: ${PROJECT_DIR} does not exist. Clone your repo there first." >&2
+        exit 1
+    fi
+    if [ ! -f "${PROJECT_DIR}/app/main.py" ]; then
+        echo "WARNING: ${PROJECT_DIR}/app/main.py not found — double check your project layout."
+    fi
+
     cd "${PROJECT_DIR}"
     python3 -m venv .venv
     source .venv/bin/activate
     pip install --upgrade pip
     [ -f requirements.txt ] && pip install -r requirements.txt
-    pip install gunicorn psycopg2-binary
+    pip install gunicorn uvicorn[standard] psycopg2-binary
 
     cat > .env <<EOF
 DB_NAME=${DB_NAME}
@@ -137,37 +118,28 @@ DEBUG=False
 EOF
 
     mkdir -p static media logs
-
-    if [ "${IS_DJANGO}" = true ] && [ -f manage.py ]; then
-        python manage.py migrate
-        python manage.py collectstatic --no-input
-        echo "Run 'python manage.py createsuperuser' manually (needs interactive input)."
-    fi
     deactivate
 }
 
-# 8. systemd service
+# 7. systemd service (FastAPI via gunicorn + uvicorn worker)
 step_systemd_service() {
     log "Creating systemd service"
     sudo tee "/etc/systemd/system/${PROJECT_NAME}.service" > /dev/null <<EOF
 [Unit]
-Description=${PROJECT_NAME} Gunicorn Service
+Description=${PROJECT_NAME} FastAPI Service
 After=network.target postgresql.service redis-server.service
 
 [Service]
-Type=notify
 User=${LINUX_USER}
 Group=www-data
 WorkingDirectory=${PROJECT_DIR}
 Environment="PATH=${PROJECT_DIR}/.venv/bin"
 EnvironmentFile=${PROJECT_DIR}/.env
 ExecStart=${PROJECT_DIR}/.venv/bin/gunicorn \\
-    --workers 4 \\
-    --threads 2 \\
-    --worker-class=gthread \\
-    --worker-tmp-dir /dev/shm \\
+    --workers ${UVICORN_WORKERS} \\
+    --worker-class uvicorn.workers.UvicornWorker \\
     --bind unix:${PROJECT_DIR}/${PROJECT_NAME}.sock \\
-    ${PROJECT_NAME}.wsgi:application
+    app.main:app
 ExecReload=/bin/kill -HUP \$MAINPID
 KillMode=mixed
 TimeoutStopSec=5
@@ -182,7 +154,7 @@ EOF
     sudo systemctl enable --now "${PROJECT_NAME}.service"
 }
 
-# 9. Nginx site config
+# 8. Nginx site config
 step_nginx_config() {
     log "Configuring Nginx site"
     sudo tee "/etc/nginx/sites-available/${PROJECT_NAME}" > /dev/null <<EOF
@@ -223,7 +195,7 @@ EOF
     sudo systemctl restart nginx
 }
 
-# 10. SSL
+# 9. SSL
 step_ssl() {
     log "Setting up SSL with Let's Encrypt"
     pause "Make sure ${DOMAIN} and ${DOMAIN_WWW} already point at this server's IP, then"
@@ -232,7 +204,7 @@ step_ssl() {
     sudo systemctl enable --now certbot.timer
 }
 
-# 11. Firewall
+# 10. Firewall
 step_firewall() {
     log "Configuring firewall"
     sudo apt install ufw -y
@@ -245,7 +217,7 @@ step_firewall() {
     sudo ufw status
 }
 
-# 12. Backups
+# 11. Backups
 step_backups() {
     log "Setting up daily DB backup cron job"
     cat > "/home/${LINUX_USER}/backup_db.sh" <<EOF
@@ -260,7 +232,7 @@ EOF
     (crontab -l 2>/dev/null | grep -v backup_db.sh; echo "0 2 * * * /home/${LINUX_USER}/backup_db.sh") | crontab -
 }
 
-# 13. Permissions
+# 12. Permissions
 step_permissions() {
     log "Setting permissions"
     sudo chown -R www-data:www-data "${PROJECT_DIR}"
@@ -268,7 +240,7 @@ step_permissions() {
     sudo chmod -R 775 "${PROJECT_DIR}/media" "${PROJECT_DIR}/static" 2>/dev/null || true
 }
 
-# 14. Health check
+# 13. Health check
 step_healthcheck() {
     log "Health check"
     for service in nginx postgresql redis-server "${PROJECT_NAME}"; do
@@ -286,7 +258,6 @@ main() {
     step_redis
     step_python
     step_nginx_install
-    step_git_clone
     step_venv_setup
     step_systemd_service
     step_nginx_config
