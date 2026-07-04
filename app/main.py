@@ -12,13 +12,13 @@ from app.api import task_api
 UPLOAD_DIR = "uploads"
 if not os.path.exists(UPLOAD_DIR):
     os.makedirs(UPLOAD_DIR)
-    
+
+allowed_url = os.getenv("BASE_URL")
+
 app = FastAPI()
 
 origins = [
-    "http://localhost:5173",
-    "http://127.0.0.1:5500",
-    "http://localhost:8080",
+    allowed_url
 ]
 
 app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
