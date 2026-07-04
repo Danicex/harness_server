@@ -365,7 +365,7 @@ def generate_otp() -> str:
 async def send_verification_email(email_request: EmailRequest):
     try:
         otp_code = generate_otp()
-        redis_client.delete(f"otp:{email_request.to}") #delete the data attached to the prev key
+        await redis_client.delete(f"otp:{email_request.to}") #delete the data attached to the prev key
         key = f"otp:{email_request.to}"
 
         data = {
