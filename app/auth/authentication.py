@@ -11,8 +11,8 @@ from sqlmodel import Session, select
 from app.database import engine
 from typing import List, Union
 import random
-import redis.asyncio as redis
 import json
+from app.redis import redis_client
 from app.services.mailer import send_mail
 import secrets
 from jose.exceptions import JWTError, ExpiredSignatureError
@@ -25,12 +25,7 @@ ACCESS_TOKEN_EXPIRE_DAYS = 30
 SECRET_KEY = os.getenv("SECRET_KEY")
 ALGORITHM = "HS256"
 
-redis_client = redis.Redis(
-    host='localhost',
-    port=REDIS_PORT,
-    db=int(0),
-    decode_responses=True
-)
+
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 # Pydantic models for request/response
